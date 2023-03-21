@@ -8,6 +8,8 @@ type VideoProps = VideoHTMLAttributes<HTMLVideoElement> & {
 };
 
 export const Video = ({ srcObject, ...props }: VideoProps) => {
+  console.log({ srcObject, tracks: srcObject?.getTracks() });
+
   const refVideo = useCallback(
     (node: HTMLVideoElement) => {
       if (node) node.srcObject = srcObject;

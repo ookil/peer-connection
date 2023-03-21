@@ -1,3 +1,4 @@
+import { Box, Grid, Typography } from "@mui/material";
 import {
   addDoc,
   collection,
@@ -6,9 +7,9 @@ import {
   onSnapshot,
   updateDoc,
 } from "firebase/firestore";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Video } from "../../components/video";
 import { db } from "../../providers/firebase";
-import { Room } from "../room";
 import { LobbyCard } from "./components/LobbyCard";
 
 const collections = {
@@ -25,10 +26,13 @@ const configuration = {
   ],
 };
 
+type VideoType = HTMLVideoElement;
+
 export const Lobby = () => {
   const [roomId, setRoomId] = useState("");
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  let remoteStream: MediaStream | null = null;
+  const remoteStreamRef = useRef<VideoType | null>(null);
+  const [isPeer, setIsPeer] = useState(false);
 
   useEffect(() => {
     const setUpLocalStream = async () => {
@@ -49,6 +53,10 @@ export const Lobby = () => {
       const roomRef = await addDoc(roomsRef, {});
 
       const peerConnection = new RTCPeerConnection(configuration);
+      peerConnection.onconnectionstatechange = () => {
+        const state = peerConnection.connectionState;
+        console.log({ state });
+      };
 
       // adds a new media track to the set of tracks which will be transmitted to the other peer
       if (localStream) {
@@ -84,10 +92,10 @@ export const Lobby = () => {
 
       peerConnection.addEventListener("track", (event) => {
         console.log("Got remote track:", event.streams[0]);
-        event.streams[0].getTracks().forEach((track) => {
-          console.log("Add a track to the remoteStream:", track);
-          remoteStream?.addTrack(track);
-        });
+        if (remoteStreamRef && remoteStreamRef?.current) {
+          console.log("adding stream");
+          remoteStreamRef.current.srcObject = event.streams[0];
+        }
       });
 
       // listening for remote session description
@@ -129,8 +137,17 @@ export const Lobby = () => {
     }
   };
 
-  const joinRoom = async (connectToRoomId: string) => {
+  const onJoinRoom = async (connectToRoomId: string) => {
     const roomRef = doc(db, "rooms", connectToRoomId);
+    const roomSnap = await getDoc(roomRef);
+    if (roomSnap.exists()) {
+      setRoomId(connectToRoomId);
+      setIsPeer(true);
+    }
+  };
+
+  const joinedRoom = async (roomId: string) => {
+    const roomRef = doc(db, "rooms", roomId);
     const roomSnap = await getDoc(roomRef);
 
     if (roomSnap.exists()) {
@@ -148,20 +165,21 @@ export const Lobby = () => {
         `${collections.rooms}/${roomRef.id}/${collections.calleeCandidates}`
       );
 
-      peerConnection.onicecandidate = (event) => {
+      peerConnection.onicecandidate = async (event) => {
         if (event.candidate) {
           console.log("Got candidate: ", event.candidate);
-          addDoc(calleeCandidatesCollection, event.candidate.toJSON());
+          await addDoc(calleeCandidatesCollection, event.candidate.toJSON());
         }
         console.log("No ICE");
       };
 
       peerConnection.addEventListener("track", (event) => {
         console.log("Got remote track:", event.streams[0]);
-        event.streams[0].getTracks().forEach((track) => {
-          console.log("Add a track to the remoteStream:", track);
-          remoteStream?.addTrack(track);
-        });
+        if (remoteStreamRef && remoteStreamRef?.current) {
+          console.log("adding stream");
+          remoteStreamRef.current.srcObject = event.streams[0];
+          console.log({ when: "after", remoteStreamRef });
+        }
       });
 
       // creating SDP answer
@@ -199,21 +217,45 @@ export const Lobby = () => {
           });
         },
       });
-      setRoomId(connectToRoomId);
+
+      peerConnection.onconnectionstatechange = () => {
+        console.log(peerConnection.connectionState);
+      };
     }
   };
 
+  useEffect(() => {
+    if (isPeer && roomId && remoteStreamRef && remoteStreamRef.current) {
+      joinedRoom(roomId);
+    }
+  }, [roomId, remoteStreamRef, isPeer]);
+
   if (!roomId) {
     return (
-      <LobbyCard handleCreateRoom={createRoom} handleJoinRoom={joinRoom} />
+      <LobbyCard handleCreateRoom={createRoom} handleJoinRoom={onJoinRoom} />
     );
   }
 
   return (
-    <Room
-      roomId={roomId}
-      localStream={localStream}
-      remoteStream={remoteStream}
-    />
+    <Box>
+      <Typography sx={{ height: "50px" }}>{roomId}</Typography>
+      <Grid container spacing={2}>
+        <Grid item xs={12} md={6}>
+          <Video
+            srcObject={localStream}
+            style={{ background: "black" }}
+            autoPlay
+            playsInline
+          />
+        </Grid>
+        <Grid item xs={12} md={6}>
+          <video
+            ref={remoteStreamRef}
+            style={{ background: "black" }}
+            autoPlay
+          />
+        </Grid>
+      </Grid>
+    </Box>
   );
 };
